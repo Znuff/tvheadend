@@ -20,6 +20,7 @@
 #include "settings.h"
 #include "profile.h"
 #include "streaming.h"
+#include "channels.h"
 #include "access.h"
 #include "plumbing/tsfix.h"
 #include "plumbing/globalheaders.h"
@@ -1607,7 +1608,10 @@ const idclass_t profile_mpegts_spawn_class =
       .name     = N_("Command line"),
       .desc     = N_("Command line to run a task which accepts MPEG-TS stream"
                      " on stdin and writes output to stdout in format specified"
-                     " by the selected mime type."),
+                     " by the selected mime type. The child receives"
+                     " TVH_CHANNEL_NAME, TVH_NETWORK_NAME, TVH_SERVICE_ID,"
+                     " TVH_TSID and TVH_ONID environment variables."
+                     " TVH_CHANNEL_NAME is empty for service-based streams."),
       .off      = offsetof(profile_mpegts_spawn_t, pro_cmdline),
       .opts     = PO_MULTILINE,
       .group    = 2
@@ -1753,6 +1757,11 @@ profile_mpegts_spawn_reopen(profile_chain_t *prch,
   c.u.pass.m_rewrite_nit = pro->pro_rewrite_nit;
   c.u.pass.m_rewrite_eit = pro->pro_rewrite_eit;
 
+  if (prch->prch_id && idnode_is_instance((idnode_t *)prch->prch_id, &channel_class))
+    mystrset(&c.u.pass.m_channel_name,
+             channel_get_name((channel_t *)prch->prch_id, channel_blank_name));
+  else
+    mystrset(&c.u.pass.m_channel_name, NULL);
   mystrset(&c.u.pass.m_cmdline, pro->pro_cmdline);
   mystrset(&c.u.pass.m_mime, pro->pro_mime);
   c.u.pass.m_killsig = pro->pro_killsig;

@@ -46,6 +46,7 @@ typedef struct pass_muxer {
 
   /* Streaming components */
   streaming_start_t *pm_ss;
+  char *pm_network_name;
 
   /* TS muxing */
   uint8_t  pm_rewrite_sdt;
@@ -436,6 +437,7 @@ pass_muxer_reconfigure(muxer_t* m, const struct streaming_start *ss)
   pm->pm_src_sid     = ss->ss_service_id;
   pm->pm_src_tsid    = ss->ss_si.si_tsid;
   pm->pm_src_onid    = ss->ss_si.si_onid;
+  mystrset(&pm->pm_network_name, ss->ss_si.si_network);
   if (pm->m_config.u.pass.m_rewrite_sid > 0) {
     pm->pm_dst_sid   = pm->m_config.u.pass.m_rewrite_sid;
     pm->pm_dst_tsid  = 1;
@@ -496,21 +498,58 @@ pass_muxer_init(muxer_t* m, struct streaming_start *ss, const char *name)
 /**
  * Open the spawned task on demand
  */
+static char *
+pass_muxer_env_value(const char *name, const char *value)
+{
+  size_t len;
+  char *env;
+
+  if (!value)
+    value = "";
+  len = strlen(name) + strlen(value) + 2;
+  env = malloc(len);
+  if (env)
+    snprintf(env, len, "%s=%s", name, value);
+  return env;
+}
+
+static void
+pass_muxer_env_free(char **envp)
+{
+  int i;
+
+  for (i = 0; i < 5; i++)
+    free(envp[i]);
+}
+
 static int
 pass_muxer_open2(pass_muxer_t *pm)
 {
   const char *cmdline = pm->m_config.u.pass.m_cmdline;
   char **argv = NULL;
+  char *envp[6] = { NULL };
+  char service_id[16], tsid[16], onid[16];
 
   pm->pm_spawn_pid = -1;
   if (cmdline && cmdline[0]) {
     argv = NULL;
     if (spawn_parse_args(&argv, 64, cmdline, NULL))
       goto error;
-    if (spawn_with_passthrough(argv[0], argv, NULL, pm->pm_ofd, &pm->pm_fd, &pm->pm_spawn_pid, 1)) {
+    snprintf(service_id, sizeof(service_id), "%u", (unsigned)pm->pm_src_sid);
+    snprintf(tsid, sizeof(tsid), "%u", (unsigned)pm->pm_src_tsid);
+    snprintf(onid, sizeof(onid), "%u", (unsigned)pm->pm_src_onid);
+    envp[0] = pass_muxer_env_value("TVH_CHANNEL_NAME", pm->m_config.u.pass.m_channel_name);
+    envp[1] = pass_muxer_env_value("TVH_NETWORK_NAME", pm->pm_network_name);
+    envp[2] = pass_muxer_env_value("TVH_SERVICE_ID", service_id);
+    envp[3] = pass_muxer_env_value("TVH_TSID", tsid);
+    envp[4] = pass_muxer_env_value("TVH_ONID", onid);
+    if (!envp[0] || !envp[1] || !envp[2] || !envp[3] || !envp[4])
+      goto error;
+    if (spawn_with_passthrough(argv[0], argv, envp, pm->pm_ofd, &pm->pm_fd, &pm->pm_spawn_pid, 1)) {
       tvherror(LS_PASS, "Unable to start pipe '%s' (wrong executable?)", cmdline);
       goto error;
     }
+    pass_muxer_env_free(envp);
     spawn_free_args(argv);
   } else {
     pm->pm_fd = pm->pm_ofd;
@@ -520,6 +559,7 @@ pass_muxer_open2(pass_muxer_t *pm)
 error:
   if (argv)
     spawn_free_args(argv);
+  pass_muxer_env_free(envp);
   pm->pm_error = ENOMEM;
   return -1;
 }
@@ -765,6 +805,7 @@ pass_muxer_destroy(muxer_t *m)
 
   if (pm->pm_ss)
     streaming_start_unref(pm->pm_ss);
+  free(pm->pm_network_name);
 
   dvb_table_parse_done(&pm->pm_pat);
   dvb_table_parse_done(&pm->pm_pmt);

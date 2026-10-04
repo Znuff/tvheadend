@@ -79,6 +79,7 @@ typedef struct muxer_config {
       int              m_rewrite_nit;
       int              m_rewrite_eit;
       char            *m_cmdline;
+      char            *m_channel_name;
       char            *m_mime;
       int              m_killsig;
       int              m_killtimeout;
